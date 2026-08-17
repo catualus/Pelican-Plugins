@@ -1,0 +1,15 @@
+{
+    "id": "quick-nav",
+    "name": "Quick Nav",
+    "author": "Catualus",
+    "version": "1.0.0",
+    "description": "Egg-aware Quick Access dropdown in the file manager toolbar. Jump straight to addons, gamemodes, maps, mods, config, logs and more without clicking through the tree.",
+    "category": "plugin",
+    "namespace": "Catualus\\QuickNav",
+    "class": "QuickNavPlugin",
+    "panels": [
+        "server"
+    ],
+    "panel_version": null,
+    "composer_packages": null
+}
