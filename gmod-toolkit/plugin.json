@@ -1,0 +1,15 @@
+{
+    "id": "gmod-toolkit",
+    "name": "GMod Toolkit",
+    "author": "Catualus",
+    "version": "1.0.0",
+    "description": "Garry's Mod server tools: workshop collection viewer, addon browser with enable/disable, Lua error digest grouped by addon, and DarkRP config shortcuts.",
+    "category": "plugin",
+    "namespace": "Catualus\\GmodToolkit",
+    "class": "GmodToolkitPlugin",
+    "panels": [
+        "server"
+    ],
+    "panel_version": null,
+    "composer_packages": null
+}
