@@ -1,0 +1,54 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  php:
+    name: PHP syntax
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      # Catches parse errors in both PHP and Blade files, which is the failure mode
+      # that would otherwise only show up as a white page in the panel.
+      - name: Check syntax
+        run: |
+          fail=0
+          while IFS= read -r file; do
+            if ! php -l "$file" > /dev/null 2>&1; then
+              echo "::error file=$file::$(php -l "$file" 2>&1 | head -1)"
+              fail=1
+            fi
+          done < <(find . -type f \( -name '*.php' -o -name '*.blade.php' \) -not -path './vendor/*')
+          exit $fail
+
+      - name: Check plugin manifests
+        run: |
+          fail=0
+          for manifest in */plugin.json; do
+            dir=$(dirname "$manifest")
+            id=$(php -r 'echo json_decode(file_get_contents($argv[1]), true)["id"] ?? "";' "$manifest")
+
+            if [ -z "$id" ]; then
+              echo "::error file=$manifest::missing id"
+              fail=1
+            elif [ "$id" != "$dir" ]; then
+              echo "::error file=$manifest::id '$id' does not match folder '$dir'"
+              fail=1
+            fi
+
+            if [ -n "$id" ] && [ ! -f "$dir/config/$id.php" ]; then
+              echo "::error file=$manifest::expected $dir/config/$id.php"
+              fail=1
+            fi
+          done
+          exit $fail
