@@ -1,0 +1,15 @@
+{
+    "id": "minecraft-toolkit",
+    "name": "Minecraft Toolkit",
+    "author": "Catualus",
+    "version": "1.0.0",
+    "description": "Minecraft server tools: server.properties as a typed form, ops/whitelist/ban editors with Mojang UUID lookup, mod and plugin enable/disable, and recent crash reports.",
+    "category": "plugin",
+    "namespace": "Catualus\\MinecraftToolkit",
+    "class": "MinecraftToolkitPlugin",
+    "panels": [
+        "server"
+    ],
+    "panel_version": null,
+    "composer_packages": null
+}
