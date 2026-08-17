@@ -1,0 +1,15 @@
+{
+    "id": "app-toolkit",
+    "name": "App Toolkit",
+    "author": "Catualus",
+    "version": "1.0.0",
+    "description": "Tools for Node.js and Python application servers: git redeploy, a .env editor with hidden secrets, and a read-only dependency list.",
+    "category": "plugin",
+    "namespace": "Catualus\\AppToolkit",
+    "class": "AppToolkitPlugin",
+    "panels": [
+        "server"
+    ],
+    "panel_version": null,
+    "composer_packages": null
+}
