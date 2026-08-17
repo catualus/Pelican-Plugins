@@ -1,0 +1,16 @@
+# Keep line endings consistent regardless of who checks the repo out.
+# Everything here is text and should stay LF on disk, including on Windows.
+* text=auto eol=lf
+
+# Windows-only script; leave it CRLF so it opens cleanly in Notepad.
+*.ps1 text eol=crlf
+
+# Never touched by line-ending conversion.
+*.zip binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+
+# Keep GitHub's language stats about the plugins, not the tooling.
+*.blade.php linguist-language=Blade

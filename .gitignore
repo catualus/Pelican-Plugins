@@ -1,0 +1,31 @@
+# Build output
+/dist/
+*.zip
+
+# Note: Pelican adds a "meta" key inside plugin.json while a plugin is installed.
+# It records local install state, so don't commit a plugin.json copied back off a
+# panel. build.ps1 strips it when packaging.
+
+# PHP tooling
+/vendor/
+.php-cs-fixer.cache
+.phpunit.result.cache
+/.phpstan/
+
+# Editors
+.idea/
+.vscode/
+*.sublime-workspace
+*.code-workspace
+
+# OS
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# Local scratch
+*.local
+*.log
+/tmp/
+/scratch/
