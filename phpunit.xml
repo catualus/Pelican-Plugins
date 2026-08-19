@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    The classes under test are deliberately the ones with no panel dependencies:
+    the log, .env and properties parsers. Everything else in these plugins talks to
+    the daemon or to Filament, and testing that here would mean vendoring the whole
+    panel to assert things the panel already asserts about itself.
+
+    There is no composer.json, so no autoloader - the three files are required
+    directly by bootstrap.php instead.
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.0/phpunit.xsd"
+         bootstrap="tests/bootstrap.php"
+         colors="true"
+         failOnWarning="true"
+         failOnNotice="true">
+    <testsuites>
+        <testsuite name="parsers">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>
