@@ -43,6 +43,9 @@ class ModService
             $enabled = str_ends_with($file, '.jar');
 
             $items[] = [
+                // Table records are keyed on this; the filename is unique within the
+                // directory and survives a re-render, which is what Livewire needs.
+                '__key' => $file,
                 'name' => $this->displayName($file),
                 'file' => $file,
                 'enabled' => $enabled,
@@ -89,6 +92,46 @@ class ModService
             'message' => $enable
                 ? "Enabled {$label}. Restart the server to load it."
                 : "Disabled {$label}. Restart the server to unload it.",
+        ];
+    }
+
+    /**
+     * Toggles a set of files in one go, reporting the tally rather than one
+     * notification per file - selecting forty mods and getting forty toasts is worse
+     * than selecting forty and getting one honest summary.
+     *
+     * @param  list<string>  $files
+     * @return array{ok: bool, message: string}
+     */
+    public function toggleMany(Server $server, array $files, bool $enable): array
+    {
+        $done = 0;
+        $failed = [];
+
+        foreach ($files as $file) {
+            $result = $this->toggle($server, $file, $enable);
+
+            if ($result['ok']) {
+                $done++;
+
+                continue;
+            }
+
+            $failed[] = basename(trim($file, '/'));
+        }
+
+        $verb = $enable ? 'Enabled' : 'Disabled';
+
+        if ($failed === []) {
+            return [
+                'ok' => true,
+                'message' => "{$verb} {$done} " . ($done === 1 ? 'file' : 'files') . '. Restart the server to apply.',
+            ];
+        }
+
+        return [
+            'ok' => $done > 0,
+            'message' => "{$verb} {$done}, but could not rename: " . implode(', ', $failed) . '.',
         ];
     }
 

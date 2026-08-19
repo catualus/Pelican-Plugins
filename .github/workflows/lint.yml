@@ -7,7 +7,7 @@ on:
 
 jobs:
   php:
-    name: PHP syntax
+    name: PHP syntax & parser tests
     runs-on: ubuntu-latest
 
     steps:
@@ -16,6 +16,10 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
+          # The parsers use mb_* throughout, which the panel has and a bare CLI
+          # build does not.
+          extensions: mbstring
+          tools: phpunit
           coverage: none
 
       # Catches parse errors in both PHP and Blade files, which is the failure mode
@@ -52,3 +56,12 @@ jobs:
             fi
           done
           exit $fail
+
+      # A namespace that does not match its directory, or an import of a class that
+      # no longer exists, produces no syntax error and no test failure - it shows up
+      # in the panel as a page that has silently stopped appearing.
+      - name: Check structure
+        run: php tools/check-structure.php
+
+      - name: Run parser tests
+        run: phpunit

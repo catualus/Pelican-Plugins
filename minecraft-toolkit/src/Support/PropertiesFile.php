@@ -18,12 +18,23 @@ final class PropertiesFile
     /** @var list<array{type: string, raw: string, key?: string, value?: string}> */
     private array $lines = [];
 
+    /** The file's own line ending, so a CRLF file does not come back as LF. */
+    private string $eol = "\n";
+
+    /** The exact bytes after the last line of content, reproduced verbatim. */
+    private string $trailer = '';
+
     public static function parse(string $raw): self
     {
         $file = new self();
 
-        // Keep \r out of values on CRLF files; line endings are re-added on render.
-        foreach (preg_split('/\R/', rtrim($raw, "\r\n")) ?: [] as $line) {
+        $file->eol = str_contains($raw, "\r\n") ? "\r\n" : "\n";
+
+        // Keep \r out of values on CRLF files; the line ending is re-added on render.
+        $body = rtrim($raw, "\r\n");
+        $file->trailer = substr($raw, strlen($body));
+
+        foreach (preg_split('/\R/', $body) ?: [] as $line) {
             $trimmed = ltrim($line);
 
             if ($trimmed === '' || str_starts_with($trimmed, '#') || str_starts_with($trimmed, '!')) {
@@ -106,7 +117,7 @@ final class PropertiesFile
             $out[] = $line['raw'] ?? ($line['key'] . '=' . self::escapeValue($line['value']));
         }
 
-        return implode("\n", $out) . "\n";
+        return implode($this->eol, $out) . $this->trailer;
     }
 
     /**

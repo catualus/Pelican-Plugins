@@ -3,7 +3,6 @@
 namespace Catualus\GmodToolkit\Services;
 
 use App\Models\Server;
-use App\Repositories\Daemon\DaemonFileRepository;
 use Catualus\GmodToolkit\Support\GarrysMod;
 use Illuminate\Support\Carbon;
 use Throwable;
@@ -20,18 +19,23 @@ class AddonService
     public function __construct(
         private readonly GarrysMod $gmod,
         private readonly LuaErrorService $errors,
+        private readonly DiskUsageService $disk,
     ) {}
 
     /**
-     * @return list<array{name: string, enabled: bool, path: string, modified: ?Carbon, errors: int, recent: int}>
+     * @return list<array<string, mixed>>
      */
     public function all(Server $server): array
     {
         $errors = $this->errorCounts($server);
 
+        // Sizes only exist once someone has run the scan; until then the column is
+        // simply empty rather than the page pretending it knows.
+        $sizes = $this->disk->cached($server)['addons'] ?? [];
+
         $addons = [
-            ...$this->read($server, 'garrysmod/addons', true, $errors),
-            ...$this->read($server, 'garrysmod/addons/' . self::DISABLED_DIR, false, $errors),
+            ...$this->read($server, 'garrysmod/addons', true, $errors, $sizes),
+            ...$this->read($server, 'garrysmod/addons/' . self::DISABLED_DIR, false, $errors, $sizes),
         ];
 
         // Live problems first, then worst overall, then alphabetical - an addon that
@@ -44,9 +48,10 @@ class AddonService
 
     /**
      * @param  array<string, array{count: int, recent: int}>  $errors
-     * @return list<array{name: string, enabled: bool, path: string, modified: ?Carbon, errors: int, recent: int}>
+     * @param  array<string, int>  $sizes
+     * @return list<array<string, mixed>>
      */
-    private function read(Server $server, string $directory, bool $enabled, array $errors): array
+    private function read(Server $server, string $directory, bool $enabled, array $errors, array $sizes): array
     {
         $addons = [];
 
@@ -59,10 +64,14 @@ class AddonService
             }
 
             $addons[] = [
+                // Table records are keyed on this; the folder name is already unique
+                // within addons/ and survives a re-render, which is what Livewire needs.
+                '__key' => $name,
                 'name' => $name,
                 'enabled' => $enabled,
                 'path' => $directory . '/' . $name,
                 'modified' => $this->parseDate($entry['modified'] ?? null),
+                'size' => $sizes[$name] ?? null,
                 'errors' => $errors[mb_strtolower($name)]['count'] ?? 0,
                 // Errors in the tail of the log - an addon with none of these is
                 // carrying historical noise, not a live problem.
@@ -113,27 +122,59 @@ class AddonService
         $from = $enable ? 'addons/' . self::DISABLED_DIR . '/' . $name : 'addons/' . $name;
         $to = $enable ? 'addons/' . $name : 'addons/' . self::DISABLED_DIR . '/' . $name;
 
-        try {
-            if (!$enable && !$this->gmod->exists($server, 'garrysmod/addons/' . self::DISABLED_DIR)) {
-                app(DaemonFileRepository::class)
-                    ->setServer($server)
-                    ->createDirectory(self::DISABLED_DIR, '/garrysmod/addons');
-            }
-
-            app(DaemonFileRepository::class)
-                ->setServer($server)
-                ->renameFiles('/garrysmod', [['from' => $from, 'to' => $to]]);
-        } catch (Throwable $e) {
-            return ['ok' => false, 'message' => $e->getMessage()];
+        if (!$enable && !$this->gmod->exists($server, 'garrysmod/addons/' . self::DISABLED_DIR)) {
+            $this->gmod->createDirectory($server, self::DISABLED_DIR, 'garrysmod/addons');
         }
 
-        $this->gmod->forget($server);
+        if (!$this->gmod->rename($server, 'garrysmod', $from, $to)) {
+            return ['ok' => false, 'message' => "Could not move {$name}."];
+        }
 
         return [
             'ok' => true,
             'message' => $enable
                 ? "Enabled {$name}. Restart the server to load it."
                 : "Disabled {$name}. Restart the server to unload it.",
+        ];
+    }
+
+    /**
+     * Toggles a set of addons in one go, reporting the tally rather than one
+     * notification per addon - selecting forty and getting forty toasts is worse
+     * than selecting forty and getting one honest summary.
+     *
+     * @param  list<string>  $names
+     * @return array{ok: bool, message: string}
+     */
+    public function toggleMany(Server $server, array $names, bool $enable): array
+    {
+        $done = 0;
+        $failed = [];
+
+        foreach ($names as $name) {
+            $result = $this->toggle($server, $name, $enable);
+
+            if ($result['ok']) {
+                $done++;
+
+                continue;
+            }
+
+            $failed[] = basename(trim($name, '/'));
+        }
+
+        $verb = $enable ? 'Enabled' : 'Disabled';
+
+        if ($failed === []) {
+            return [
+                'ok' => true,
+                'message' => "{$verb} {$done} addon" . ($done === 1 ? '' : 's') . '. Restart the server to apply.',
+            ];
+        }
+
+        return [
+            'ok' => $done > 0,
+            'message' => "{$verb} {$done}, but could not move: " . implode(', ', $failed) . '.',
         ];
     }
 

@@ -27,8 +27,12 @@ class QuickNavToolbar
         }
 
         $shortcuts = app(QuickNavResolver::class)->shortcuts($server);
+        $historyLimit = max(0, (int) config('quick-nav.history_limit', 6));
 
-        if ($shortcuts === []) {
+        // With no preset shortcuts, pins and history are still worth the button - they
+        // work on any server. With those switched off too there is genuinely nothing to
+        // offer, and the button hides rather than opening an empty menu.
+        if ($shortcuts === [] && $historyLimit === 0) {
             return '';
         }
 
@@ -36,8 +40,18 @@ class QuickNavToolbar
             'shortcuts' => array_map(fn (array $shortcut): array => [
                 'label' => $shortcut['label'],
                 'icon' => $shortcut['icon'] ?? 'tabler-folder',
+                'path' => trim($shortcut['path'], '/'),
                 'url' => ListFiles::getUrl(['path' => trim($shortcut['path'], '/')]),
             ], $shortcuts),
+
+            // The file list's path is a route segment rather than a query parameter,
+            // so building a URL for an arbitrary folder means appending to this.
+            'base' => rtrim(ListFiles::getUrl(), '/'),
+
+            // Pins and history are per server and live in the browser - see the view.
+            'storageKey' => 'quick-nav:' . $server->uuid,
+
+            'historyLimit' => $historyLimit,
         ]);
     }
 }

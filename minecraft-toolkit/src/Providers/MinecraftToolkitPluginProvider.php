@@ -2,6 +2,7 @@
 
 namespace Catualus\MinecraftToolkit\Providers;
 
+use Catualus\MinecraftToolkit\Services\CrashReportService;
 use Catualus\MinecraftToolkit\Services\ModService;
 use Catualus\MinecraftToolkit\Services\PlayerListService;
 use Catualus\MinecraftToolkit\Services\PropertiesService;
@@ -19,5 +20,6 @@ class MinecraftToolkitPluginProvider extends ServiceProvider
         $this->app->scoped(ModService::class);
         $this->app->scoped(PlayerListService::class);
         $this->app->scoped(PropertiesService::class);
+        $this->app->scoped(CrashReportService::class);
     }
 }

@@ -22,7 +22,7 @@ class LuaErrorService
     public function __construct(private readonly GarrysMod $gmod) {}
 
     /**
-     * @return list<array{key: string, label: string, path: string, present: bool, hint: ?string, total: int, groups: list<array<string, mixed>>}>
+     * @return list<array<string, mixed>>
      */
     public function sources(Server $server): array
     {
@@ -45,6 +45,7 @@ class LuaErrorService
 
                 if (!isset($merged[$key])) {
                     $merged[$key] = $group;
+                    $merged[$key]['sources'] = [$source['label']];
 
                     continue;
                 }
@@ -53,6 +54,11 @@ class LuaErrorService
                 $merged[$key]['reporters'] += $group['reporters'];
                 $merged[$key]['recent'] += $group['recent'];
                 $merged[$key]['path'] ??= $group['path'];
+                $merged[$key]['sources'][] = $source['label'];
+                $merged[$key]['variants'] = $this->mergeVariants(
+                    $merged[$key]['variants'] ?? [],
+                    $group['variants'] ?? [],
+                );
                 // Indices are per-source, so the meaningful merge is the later one.
                 $merged[$key]['last_index'] = max($merged[$key]['last_index'], $group['last_index']);
             }
@@ -65,16 +71,64 @@ class LuaErrorService
     }
 
     /**
+     * Totals across every source, for the overview stat tiles.
+     *
+     * @return array{errors: int, addons: int, active: int, players: int}
+     */
+    public function totals(Server $server): array
+    {
+        $digest = $this->digest($server);
+
+        return [
+            'errors' => array_sum(array_column($digest, 'count')),
+            'addons' => count($digest),
+            'active' => count(array_filter($digest, static fn (array $g): bool => $g['recent'] > 0)),
+            'players' => array_sum(array_column($digest, 'reporters')),
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $a
+     * @param  list<array<string, mixed>>  $b
+     * @return list<array<string, mixed>>
+     */
+    private function mergeVariants(array $a, array $b): array
+    {
+        $merged = [];
+
+        foreach ([...$a, ...$b] as $variant) {
+            $key = $variant['message'] . "\0" . ($variant['location'] ?? '');
+
+            if (isset($merged[$key])) {
+                $merged[$key]['count'] += $variant['count'];
+
+                continue;
+            }
+
+            $merged[$key] = $variant;
+        }
+
+        $variants = array_values($merged);
+        usort($variants, static fn (array $x, array $y): int => $y['count'] <=> $x['count']);
+
+        return $variants;
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     private function read(Server $server): array
     {
         $sources = [];
         $window = (int) config('gmod-toolkit.recent_window', 100);
+        $buckets = (int) config('gmod-toolkit.timeline_buckets', 40);
 
         foreach (config('gmod-toolkit.error_logs', []) as $key => $source) {
             $entry = $this->gmod->entry($server, $source['path']);
-            $groups = $entry === null ? [] : $this->digestFile($server, $source['path'], $entry, $window);
+
+            $analysis = $entry === null
+                ? ['groups' => [], 'total' => 0, 'buckets' => []]
+                : $this->analyseFile($server, $source['path'], $entry, $window, $buckets);
 
             $sources[] = [
                 'key' => (string) $key,
@@ -82,12 +136,14 @@ class LuaErrorService
                 'path' => $source['path'],
                 'present' => $entry !== null,
                 'hint' => $entry === null ? ($source['hint'] ?? null) : null,
-                'total' => array_sum(array_column($groups, 'count')),
+                'total' => $analysis['total'],
                 'window' => $window,
+                'buckets' => $analysis['buckets'],
+                'size' => (int) ($entry['size'] ?? 0),
                 // The only wall-clock signal available: these logs have no timestamps,
                 // so the file's own mtime is when the newest error in it was written.
                 'modified' => $this->gmod->modifiedAt($server, $source['path']),
-                'groups' => $groups,
+                'groups' => $analysis['groups'],
             ];
         }
 
@@ -103,9 +159,9 @@ class LuaErrorService
      * can never serve stale counts.
      *
      * @param  array<string, mixed>  $entry
-     * @return list<array<string, mixed>>
+     * @return array{groups: list<array<string, mixed>>, total: int, buckets: list<int>}
      */
-    private function digestFile(Server $server, string $path, array $entry, int $window): array
+    private function analyseFile(Server $server, string $path, array $entry, int $window, int $buckets): array
     {
         $ttl = (int) config('gmod-toolkit.digest_cache_ttl', 3600);
 
@@ -114,22 +170,27 @@ class LuaErrorService
             (string) ($entry['modified'] ?? ''),
             (string) ($entry['size'] ?? ''),
             (string) $window,
+            (string) $buckets,
         ]));
 
-        $cacheKey = 'gmod-toolkit:digest:' . $server->uuid . ':' . $fingerprint;
+        // v2 because the cached shape changed; an old entry must not be read back.
+        $cacheKey = 'gmod-toolkit:digest:v2:' . $server->uuid . ':' . $fingerprint;
 
         if ($ttl > 0 && is_array($cached = Cache::get($cacheKey))) {
             return $cached;
         }
 
         $contents = $this->gmod->contents($server, $path);
-        $groups = $contents === null ? [] : LuaErrorParser::digest($contents, $window);
+
+        $analysis = $contents === null
+            ? ['groups' => [], 'total' => 0, 'buckets' => []]
+            : LuaErrorParser::analyse($contents, $window, $buckets);
 
         if ($ttl > 0) {
-            Cache::put($cacheKey, $groups, $ttl);
+            Cache::put($cacheKey, $analysis, $ttl);
         }
 
-        return $groups;
+        return $analysis;
     }
 
     /**
@@ -146,5 +207,15 @@ class LuaErrorService
         unset($this->cache[$server->uuid]);
 
         return true;
+    }
+
+    /**
+     * The raw log, for the "download before clearing" action.
+     */
+    public function contents(Server $server, string $key): ?string
+    {
+        $source = config('gmod-toolkit.error_logs.' . $key);
+
+        return $source === null ? null : $this->gmod->contents($server, $source['path']);
     }
 }

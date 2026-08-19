@@ -19,6 +19,34 @@ Shortcuts are filtered against the real filesystem, so a Paper server shows `plu
 CurseForge modpack shows `mods` and `kubejs` from the same preset list, with no per-server
 configuration.
 
+## Pinned and recent folders
+
+Underneath the presets, the dropdown offers two more sections:
+
+- **Pinned** - folders you chose to keep. Whatever folder you are currently looking at can
+  be pinned or unpinned from the bottom of the menu.
+- **Recent** - the last few folders you opened on this server, newest first, with the one
+  you are standing in left out.
+
+These work on any server, including ones with no presets at all - which is why the button
+now appears on servers Quick Nav previously had nothing to say about. Set `history_limit` to
+`0` to switch both off, and the button goes back to hiding itself when there are no
+shortcuts.
+
+### Where they are stored
+
+**In your browser's localStorage, per server. Nothing about them reaches the panel.**
+
+That is a deliberate choice. They are a per-person, per-browser convenience; the panel gives
+plugins no durable per-user storage without a database migration, which this plugin does not
+want; and the application cache would lose them silently the first time it was cleared.
+localStorage is honest about what it is, costs the panel nothing, and keeps one subuser's
+pins out of another's dropdown. If localStorage is unavailable the preset shortcuts still
+work and these two sections simply never appear.
+
+There is deliberately **no global keyboard shortcut**. Binding a key in a screen where
+people type file names is a good way to cause a surprise.
+
 ## Install
 
 1. Zip the `quick-nav` folder.
@@ -69,17 +97,19 @@ Failed probes are never cached, so shortcuts return as soon as a downed node doe
 Keep preset paths shallow - existence checking costs one listing per distinct parent
 directory. Root-level presets are effectively free after the first.
 
+**`history_limit`** - how many pinned and how many recent folders the dropdown offers
+(default 6). Set to `0` to remove both sections; with no presets either, the button hides
+itself entirely.
+
 ## Permissions
 
 Shortcuts are hidden from subusers without `file.read`, and the group disappears entirely
 when nothing resolves.
 
-## Not included in 1.0
+## Not included
 
-Per-user starred favourites (a `quick_nav_favorites` table plus an "Add current folder"
-entry) are the planned 1.1. Shortcuts to individual *files* - `server.properties`, `.env` -
-would need the editor route rather than the listing route, and are deliberately out of scope
-here.
+Shortcuts to individual *files* - `server.properties`, `.env` - would need the editor route
+rather than the listing route, and are deliberately out of scope here.
 
 ---
 

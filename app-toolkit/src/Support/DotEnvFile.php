@@ -14,11 +14,26 @@ final class DotEnvFile
     /** @var list<array{type: string, raw: ?string, key?: string, value?: string, export?: bool, quote?: string}> */
     private array $lines = [];
 
+    /** The file's own line ending, so a CRLF file does not come back as LF. */
+    private string $eol = "\n";
+
+    /**
+     * The exact bytes after the last line of content - which may be several blank
+     * lines, or none at all. Reproduced verbatim so "everything you did not change
+     * keeps its exact bytes" is true of the end of the file as well as the middle.
+     */
+    private string $trailer = '';
+
     public static function parse(string $raw): self
     {
         $file = new self();
 
-        foreach (preg_split('/\R/', rtrim($raw, "\r\n")) ?: [] as $line) {
+        $file->eol = str_contains($raw, "\r\n") ? "\r\n" : "\n";
+
+        $body = rtrim($raw, "\r\n");
+        $file->trailer = substr($raw, strlen($body));
+
+        foreach (preg_split('/\R/', $body) ?: [] as $line) {
             $trimmed = trim($line);
 
             if ($trimmed === '' || str_starts_with($trimmed, '#')) {
@@ -122,7 +137,34 @@ final class DotEnvFile
                 . $line['key'] . '=' . self::quote($line['value'], $line['quote']);
         }
 
-        return implode("\n", $out) . "\n";
+        return implode($this->eol, $out) . $this->trailer;
+    }
+
+    /**
+     * The file with one new variable added at the end.
+     *
+     * An append rather than a re-render, so every existing line keeps its exact
+     * bytes, and using the file's own line ending rather than assuming LF.
+     */
+    public function append(string $key, string $value): string
+    {
+        $rendered = $this->render();
+
+        // Only add a separator if the file does not already end with a line break;
+        // a file that ends in blank lines keeps them, and the new entry goes after.
+        $separator = ($rendered === '' || str_ends_with($rendered, "\n")) ? '' : $this->eol;
+
+        return $rendered . $separator . self::line($key, $value) . $this->eol;
+    }
+
+    /**
+     * A single KEY=value line, quoted the same way render() would quote it. Used when
+     * appending a new variable, so an added line is indistinguishable from one this
+     * class wrote itself.
+     */
+    public static function line(string $key, string $value): string
+    {
+        return $key . '=' . self::quote($value, '');
     }
 
     /**

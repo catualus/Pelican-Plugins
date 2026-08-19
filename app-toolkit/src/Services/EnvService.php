@@ -73,6 +73,43 @@ class EnvService
     }
 
     /**
+     * Appends a new variable.
+     *
+     * Deliberately an append rather than a re-render of the parsed file: everything
+     * already in .env keeps its exact bytes, which is the same promise save() makes.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public function add(Server $server, string $key, string $value): array
+    {
+        $key = trim($key);
+
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_.]*$/', $key)) {
+            return ['ok' => false, 'message' => 'That is not a valid .env name.'];
+        }
+
+        $raw = $this->app->contents($server, self::FILE);
+
+        if ($raw === null) {
+            return ['ok' => false, 'message' => 'Could not read .env.'];
+        }
+
+        $file = DotEnvFile::parse($raw);
+
+        if (array_key_exists($key, $file->all())) {
+            return ['ok' => false, 'message' => "{$key} is already defined. Edit it in the list instead."];
+        }
+
+        $updated = $file->append($key, $value);
+
+        if (!$this->app->put($server, self::FILE, $updated)) {
+            return ['ok' => false, 'message' => 'Could not write .env.'];
+        }
+
+        return ['ok' => true, 'message' => "Added {$key}. Restart the app for it to take effect."];
+    }
+
+    /**
      * Decides which values start hidden. This is shoulder-surfing cover, not a
      * security boundary - anyone who can open this page can already read the raw
      * file in the file manager.

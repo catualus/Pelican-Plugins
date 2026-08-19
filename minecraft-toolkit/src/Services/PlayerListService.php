@@ -53,6 +53,46 @@ class PlayerListService
     }
 
     /**
+     * Removes several entries in one write.
+     *
+     * Deliberately not a loop over remove(): each call re-reads and rewrites the
+     * whole file, so removing twenty players one at a time would be twenty
+     * read-modify-write round trips against a file the server may also be holding.
+     *
+     * @param  list<string>  $identifiers
+     * @return array{ok: bool, message: string}
+     */
+    public function removeMany(Server $server, string $list, array $identifiers): array
+    {
+        if ($identifiers === []) {
+            return ['ok' => true, 'message' => 'Nothing selected.'];
+        }
+
+        $key = $list === 'banned-ips' ? 'ip' : 'uuid';
+        $wanted = array_flip($identifiers);
+
+        $before = $this->read($server, $list);
+
+        $entries = array_values(array_filter(
+            $before,
+            static fn (array $entry): bool => !isset($wanted[(string) ($entry[$key] ?? '')]),
+        ));
+
+        $removed = count($before) - count($entries);
+
+        if ($removed === 0) {
+            return ['ok' => true, 'message' => 'Nothing matched.'];
+        }
+
+        return $this->write(
+            $server,
+            $list,
+            $entries,
+            "Removed {$removed} " . ($removed === 1 ? 'entry.' : 'entries.'),
+        );
+    }
+
+    /**
      * Adds a player by name, resolving the UUID through Mojang - Minecraft matches
      * these files on UUID, so an entry without one is silently ignored by the server.
      *
@@ -139,22 +179,49 @@ class PlayerListService
     }
 
     /**
+     * Mojang publishes the same lookup at two hosts.
+     *
+     * api.mojang.com is the long-standing one and rate limits aggressively;
+     * api.minecraftservices.com is the current one. Both return the same
+     * {id, name} shape, so trying each in turn costs nothing and means a rate limit
+     * or an outage on one does not stop somebody being added to the whitelist.
+     */
+    private const LOOKUPS = [
+        'https://api.minecraftservices.com/minecraft/profile/lookup/name/',
+        'https://api.mojang.com/users/profiles/minecraft/',
+    ];
+
+    /**
      * @return array{uuid: string, name: string}|null
      */
     private function lookup(string $name): ?array
     {
-        try {
-            $response = Http::timeout(10)
-                ->get('https://api.mojang.com/users/profiles/minecraft/' . rawurlencode($name));
+        $id = '';
+        $resolved = $name;
+
+        foreach (self::LOOKUPS as $endpoint) {
+            try {
+                $response = Http::timeout(10)->get($endpoint . rawurlencode($name));
+            } catch (Throwable) {
+                continue;
+            }
+
+            // A 404 means Mojang has no such account, which is an answer - retrying
+            // it against the other host would only be slower.
+            if ($response->status() === 404) {
+                return null;
+            }
 
             if (!$response->successful()) {
-                return null;
+                continue;
             }
 
             $id = (string) ($response->json('id') ?? '');
             $resolved = (string) ($response->json('name') ?? $name);
-        } catch (Throwable) {
-            return null;
+
+            if (strlen($id) === 32) {
+                break;
+            }
         }
 
         if (strlen($id) !== 32) {

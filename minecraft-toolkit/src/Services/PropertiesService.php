@@ -34,6 +34,8 @@ class PropertiesService
         $secrets = (array) config('minecraft-toolkit.property_secrets', []);
         $help = (array) config('minecraft-toolkit.property_help', []);
 
+        $groups = $this->groupIndex();
+
         $fields = [];
 
         foreach (PropertiesFile::parse($raw)->all() as $key => $value) {
@@ -53,10 +55,45 @@ class PropertiesService
                 // be selectable, or saving would silently change it.
                 'options' => $options !== [] && !in_array($value, $options, true) ? [...$options, $value] : $options,
                 'help' => $help[$key] ?? null,
+                // Anything the config does not place lands in Other rather than
+                // disappearing - mods and new Minecraft versions add keys.
+                'group' => $groups[$key] ?? 'Other',
             ];
         }
 
         return $fields;
+    }
+
+    /**
+     * The configured groups in order, plus Other, but only those that actually have
+     * a field in this file - an empty RCON tab on a server with no RCON keys is a
+     * tab that wastes a click.
+     *
+     * @param  list<array<string, mixed>>  $fields
+     * @return list<string>
+     */
+    public function groups(array $fields): array
+    {
+        $present = array_unique(array_column($fields, 'group'));
+        $ordered = [...array_keys((array) config('minecraft-toolkit.property_groups', [])), 'Other'];
+
+        return array_values(array_filter($ordered, static fn (string $group): bool => in_array($group, $present, true)));
+    }
+
+    /**
+     * @return array<string, string>  property key => group label
+     */
+    private function groupIndex(): array
+    {
+        $index = [];
+
+        foreach ((array) config('minecraft-toolkit.property_groups', []) as $group => $keys) {
+            foreach ((array) $keys as $key) {
+                $index[$key] = $group;
+            }
+        }
+
+        return $index;
     }
 
     /**
