@@ -126,6 +126,16 @@ final class DotEnvFile
     }
 
     /**
+     * A single KEY=value line, quoted the same way render() would quote it. Used when
+     * appending a new variable, so an added line is indistinguishable from one this
+     * class wrote itself.
+     */
+    public static function line(string $key, string $value): string
+    {
+        return $key . '=' . self::quote($value, '');
+    }
+
+    /**
      * @return array{string, string}  the value and which quote style held it
      */
     private static function readValue(string $rest): array
