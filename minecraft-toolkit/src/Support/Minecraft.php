@@ -27,6 +27,9 @@ class Minecraft
     /** @var array<string, list<array<string, mixed>>|null> */
     private array $listings = [];
 
+    /** @var array<string, int> per-server cache generation, see forget() */
+    private array $generations = [];
+
     public function detect(Server $server): bool
     {
         return $this->detected[$server->uuid] ??= $this->probe($server);
@@ -74,7 +77,7 @@ class Minecraft
         }
 
         $ttl = (int) config('minecraft-toolkit.cache_ttl', 60);
-        $cacheKey = 'minecraft-toolkit:dir:' . $key;
+        $cacheKey = $this->cacheKey($server, $path);
 
         if ($ttl > 0 && is_array($cached = Cache::get($cacheKey))) {
             return $this->listings[$key] = $cached;
@@ -173,15 +176,45 @@ class Minecraft
         }
     }
 
+    /**
+     * Invalidates every cached listing for this server.
+     *
+     * Bumps a per-server generation number that forms part of each listing's cache
+     * key, rather than deleting the keys this object happens to know about. The
+     * in-memory map only holds what the current request read, so deleting from it
+     * could never clear an entry cached by an earlier request - and anything that
+     * writes across more than one request would then go on reading the directory as
+     * it was up to cache_ttl seconds ago.
+     */
     public function forget(Server $server): void
     {
+        $generation = $this->generation($server) + 1;
+
+        $this->generations[$server->uuid] = $generation;
+
+        Cache::put($this->generationKey($server), $generation, 86400);
+
         foreach (array_keys($this->listings) as $key) {
             if (str_starts_with($key, $server->uuid . ':')) {
-                Cache::forget('minecraft-toolkit:dir:' . $key);
                 unset($this->listings[$key]);
             }
         }
 
         unset($this->flavours[$server->uuid]);
+    }
+
+    private function cacheKey(Server $server, string $path): string
+    {
+        return 'minecraft-toolkit:dir:' . $this->generation($server) . ':' . $server->uuid . ':' . $path;
+    }
+
+    private function generation(Server $server): int
+    {
+        return $this->generations[$server->uuid] ??= (int) Cache::get($this->generationKey($server), 0);
+    }
+
+    private function generationKey(Server $server): string
+    {
+        return 'minecraft-toolkit:gen:' . $server->uuid;
     }
 }
