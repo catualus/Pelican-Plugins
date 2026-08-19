@@ -45,6 +45,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Pins and history
+    |--------------------------------------------------------------------------
+    |
+    | How many pinned folders and how many recently visited folders the dropdown
+    | offers. Both are kept in the browser's localStorage, per server and per
+    | person - the panel gives plugins no durable per-user storage without a
+    | database migration, and the application cache would lose them the moment it
+    | was cleared. Nothing about them reaches the server.
+    |
+    | Set to 0 to switch both sections off entirely.
+    |
+    */
+
+    'history_limit' => 6,
+
+    /*
+    |--------------------------------------------------------------------------
     | Quick Access presets
     |--------------------------------------------------------------------------
     |
