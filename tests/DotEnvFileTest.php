@@ -35,7 +35,26 @@ final class DotEnvFileTest extends TestCase
 
         $rendered = DotEnvFile::parse($raw)->merge([])->render();
 
-        $this->assertSame($raw . "\n", $rendered);
+        // Byte for byte, including the fact that this fixture has no trailing
+        // newline. Inventing one would be a change to a file nobody asked to change.
+        $this->assertSame($raw, $rendered);
+    }
+
+    #[Test]
+    public function a_crlf_file_stays_crlf(): void
+    {
+        $raw = "# comment\r\nA=1\r\nB=2\r\n";
+
+        $this->assertSame($raw, DotEnvFile::parse($raw)->merge([])->render());
+        $this->assertSame("# comment\r\nA=9\r\nB=2\r\n", DotEnvFile::parse($raw)->merge(['A' => '9'])->render());
+    }
+
+    #[Test]
+    public function trailing_blank_lines_are_kept(): void
+    {
+        $raw = "A=1\n\n\n";
+
+        $this->assertSame($raw, DotEnvFile::parse($raw)->merge([])->render());
     }
 
     #[Test]
@@ -106,7 +125,7 @@ final class DotEnvFileTest extends TestCase
     {
         $rendered = DotEnvFile::parse('export A=1')->merge(['A' => '2'])->render();
 
-        $this->assertSame("export A=2\n", $rendered);
+        $this->assertSame('export A=2', $rendered);
     }
 
     #[Test]
@@ -114,7 +133,7 @@ final class DotEnvFileTest extends TestCase
     {
         $rendered = DotEnvFile::parse('A=simple')->merge(['A' => 'now with spaces'])->render();
 
-        $this->assertSame("A=\"now with spaces\"\n", $rendered);
+        $this->assertSame('A="now with spaces"', $rendered);
     }
 
     #[Test]
@@ -122,7 +141,7 @@ final class DotEnvFileTest extends TestCase
     {
         $rendered = DotEnvFile::parse("A='old value'")->merge(['A' => 'new value'])->render();
 
-        $this->assertSame("A='new value'\n", $rendered);
+        $this->assertSame("A='new value'", $rendered);
     }
 
     #[Test]
@@ -130,7 +149,7 @@ final class DotEnvFileTest extends TestCase
     {
         $rendered = DotEnvFile::parse("A='old'")->merge(['A' => "it's"])->render();
 
-        $this->assertSame("A=\"it's\"\n", $rendered);
+        $this->assertSame("A=\"it's\"", $rendered);
     }
 
     #[Test]
@@ -161,5 +180,41 @@ final class DotEnvFileTest extends TestCase
         $parsed = DotEnvFile::parse(DotEnvFile::line('SECRET', $value))->all();
 
         $this->assertSame($value, $parsed['SECRET']);
+    }
+
+    #[Test]
+    public function appending_leaves_every_existing_byte_alone(): void
+    {
+        $raw = "# keep\nA=1\n";
+
+        $this->assertSame("# keep\nA=1\nB=2\n", DotEnvFile::parse($raw)->append('B', '2'));
+    }
+
+    #[Test]
+    public function appending_uses_the_files_own_line_ending(): void
+    {
+        $raw = "A=1\r\n";
+
+        $this->assertSame("A=1\r\nB=2\r\n", DotEnvFile::parse($raw)->append('B', '2'));
+    }
+
+    #[Test]
+    public function appending_keeps_trailing_blank_lines(): void
+    {
+        // They are the user's blank lines. Tidying them away is still a change to a
+        // part of the file nobody asked to change.
+        $this->assertSame("A=1\n\n\nB=2\n", DotEnvFile::parse("A=1\n\n\n")->append('B', '2'));
+    }
+
+    #[Test]
+    public function appending_to_a_file_with_no_trailing_newline_adds_one_first(): void
+    {
+        $this->assertSame("A=1\nB=2\n", DotEnvFile::parse('A=1')->append('B', '2'));
+    }
+
+    #[Test]
+    public function appending_to_an_empty_file_does_not_start_with_a_blank_line(): void
+    {
+        $this->assertSame("A=1\n", DotEnvFile::parse('')->append('A', '1'));
     }
 }

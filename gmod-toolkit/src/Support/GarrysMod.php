@@ -177,31 +177,47 @@ class GarrysMod
         $limit = (int) config('gmod-toolkit.max_download_bytes', 33554432);
 
         try {
-            $response = Http::timeout((int) config('gmod-toolkit.download_timeout', 20))->get($url);
+            // Streamed and counted as it arrives. Checking the size after the fact
+            // would mean the whole archive was already in memory by the time we
+            // decided it was too big - and Content-Length cannot be checked up front
+            // here, because GitHub generating these archives on demand is exactly why
+            // it does not send one.
+            $response = Http::timeout((int) config('gmod-toolkit.download_timeout', 20))
+                ->withOptions(['stream' => true])
+                ->get($url);
+
+            if (!$response->successful()) {
+                return ['ok' => false, 'message' => 'The download returned HTTP ' . $response->status() . '.'];
+            }
+
+            $stream = $response->toPsrResponse()->getBody();
+            $body = '';
+
+            while (!$stream->eof()) {
+                $body .= $stream->read(262144);
+
+                if (strlen($body) > $limit) {
+                    $stream->close();
+
+                    return [
+                        'ok' => false,
+                        'message' => sprintf(
+                            'The archive is larger than the %s limit, so the download was stopped. Raise max_download_bytes if you want to allow it.',
+                            Bytes::human($limit),
+                        ),
+                    ];
+                }
+            }
+
+            $stream->close();
         } catch (Throwable $e) {
             return ['ok' => false, 'message' => 'The download did not finish: ' . $this->reason($e)];
         }
 
-        if (!$response->successful()) {
-            return ['ok' => false, 'message' => 'The download returned HTTP ' . $response->status() . '.'];
-        }
-
-        $body = $response->body();
         $size = strlen($body);
 
         if ($size === 0) {
             return ['ok' => false, 'message' => 'The download was empty.'];
-        }
-
-        if ($size > $limit) {
-            return [
-                'ok' => false,
-                'message' => sprintf(
-                    'The archive is %s, over the %s limit. Raise max_download_bytes if you want to allow it.',
-                    Bytes::human($size),
-                    Bytes::human($limit),
-                ),
-            ];
         }
 
         // A zip that does not start with the local file header signature is not a zip -

@@ -94,11 +94,13 @@ class EnvService
             return ['ok' => false, 'message' => 'Could not read .env.'];
         }
 
-        if (array_key_exists($key, DotEnvFile::parse($raw)->all())) {
+        $file = DotEnvFile::parse($raw);
+
+        if (array_key_exists($key, $file->all())) {
             return ['ok' => false, 'message' => "{$key} is already defined. Edit it in the list instead."];
         }
 
-        $updated = rtrim($raw, "\r\n") . "\n" . DotEnvFile::line($key, $value) . "\n";
+        $updated = $file->append($key, $value);
 
         if (!$this->app->put($server, self::FILE, $updated)) {
             return ['ok' => false, 'message' => 'Could not write .env.'];

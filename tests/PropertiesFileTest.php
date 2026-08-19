@@ -33,8 +33,10 @@ final class PropertiesFileTest extends TestCase
     #[Test]
     public function an_untouched_file_round_trips_unchanged(): void
     {
+        // Byte for byte, including the fact that this fixture has no trailing
+        // newline. Inventing one would be a change to a file nobody asked to change.
         $this->assertSame(
-            self::REAL . "\n",
+            self::REAL,
             PropertiesFile::parse(self::REAL)->merge([])->render(),
         );
     }
@@ -81,7 +83,7 @@ final class PropertiesFileTest extends TestCase
     {
         $rendered = PropertiesFile::parse(self::REAL)->merge(['level-type' => 'minecraft:normal'])->render();
 
-        $this->assertSame(self::REAL . "\n", $rendered);
+        $this->assertSame(self::REAL, $rendered);
     }
 
     #[Test]
@@ -99,7 +101,7 @@ final class PropertiesFileTest extends TestCase
             ->merge(['motd' => 'Welcome! #1 server: come in'])
             ->render();
 
-        $this->assertSame("motd=Welcome\\! \\#1 server\\: come in\n", $rendered);
+        $this->assertSame('motd=Welcome\\! \\#1 server\\: come in', $rendered);
     }
 
     #[Test]
@@ -153,5 +155,22 @@ final class PropertiesFileTest extends TestCase
         $values = PropertiesFile::parse("a=1\r\nb=2\r\n")->all();
 
         $this->assertSame(['a' => '1', 'b' => '2'], $values);
+    }
+
+    #[Test]
+    public function a_crlf_file_stays_crlf(): void
+    {
+        $raw = "#header\r\na=1\r\nb=2\r\n";
+
+        $this->assertSame($raw, PropertiesFile::parse($raw)->merge([])->render());
+        $this->assertSame("#header\r\na=9\r\nb=2\r\n", PropertiesFile::parse($raw)->merge(['a' => '9'])->render());
+    }
+
+    #[Test]
+    public function trailing_blank_lines_are_kept(): void
+    {
+        $raw = "a=1\n\n\n";
+
+        $this->assertSame($raw, PropertiesFile::parse($raw)->merge([])->render());
     }
 }

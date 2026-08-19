@@ -58,7 +58,9 @@ didn't touch, and only changed values are re-serialised. Values that need quotin
 a round trip get it automatically. That behaviour is covered by tests.
 
 **Add variable** appends a new line rather than rewriting the file, so everything already
-in it keeps its exact bytes. Requires `file.update`.
+in it keeps its exact bytes — including its line endings and any blank lines at the end.
+A CRLF `.env` stays CRLF, and a file with no trailing newline does not acquire one.
+Requires `file.update`.
 
 ## Dependencies
 
