@@ -28,16 +28,23 @@ final class LuaErrorParser
     // Gamemodes matter as much as addons here - DarkRP reports plenty of its own.
     private const ADDON_DIR = '#(?:^|/)(?<kind>addons|gamemodes)/(?<name>[^/]+)/#';
 
+    /** Distinct messages kept per addon. Beyond this the tail is noise. */
+    private const MAX_VARIANTS = 25;
+
     /**
      * These logs carry no timestamps of any kind, so "when did this last happen" is
      * not recoverable. They are append-only and chronological though, so an error's
      * position is a real recency signal: last_index is where a group last appeared,
      * and recent counts how many of its errors fall in the tail of the log.
      *
+     * Position is also what makes the timeline chart possible - slicing the log into
+     * equal-width buckets shows bursts and quiet stretches without a single timestamp.
+     *
      * @param  int  $recentWindow  how many trailing errors count as still happening
-     * @return list<array{addon: string, path: ?string, count: int, reporters: int, message: string, location: ?string, last_index: int, recent: int}>
+     * @param  int  $bucketCount  slices the log is divided into for the timeline
+     * @return array{groups: list<array<string, mixed>>, total: int, buckets: list<int>}
      */
-    public static function digest(string $contents, int $recentWindow = 100): array
+    public static function analyse(string $contents, int $recentWindow = 100, int $bucketCount = 40): array
     {
         $groups = [];
         $reporter = null;
@@ -84,6 +91,7 @@ final class LuaErrorParser
                     'message' => $error['message'],
                     'location' => $error['location'],
                     'indices' => [],
+                    'variants' => [],
                 ];
             }
 
@@ -95,6 +103,20 @@ final class LuaErrorParser
             $groups[$key]['message'] = $error['message'];
             $groups[$key]['location'] = $error['location'] ?? $groups[$key]['location'];
 
+            // Distinct message+location pairs, so an addon failing in three different
+            // places is not reported as one problem that happened 900 times.
+            $variant = $error['message'] . "\0" . ($error['location'] ?? '');
+
+            if (isset($groups[$key]['variants'][$variant])) {
+                $groups[$key]['variants'][$variant]['count']++;
+            } elseif (count($groups[$key]['variants']) < self::MAX_VARIANTS) {
+                $groups[$key]['variants'][$variant] = [
+                    'message' => $error['message'],
+                    'location' => $error['location'],
+                    'count' => 1,
+                ];
+            }
+
             if ($reporter !== null) {
                 $groups[$key]['reporters'][$reporter] = true;
             }
@@ -105,20 +127,59 @@ final class LuaErrorParser
 
         $threshold = $index - max($recentWindow, 1);
 
-        $digest = array_map(fn (array $g): array => [
-            'addon' => $g['addon'],
-            'path' => $g['path'],
-            'count' => $g['count'],
-            'reporters' => count($g['reporters']),
-            'message' => $g['message'],
-            'location' => $g['location'],
-            'last_index' => $g['indices'] === [] ? 0 : max($g['indices']),
-            'recent' => count(array_filter($g['indices'], fn (int $i): bool => $i >= $threshold)),
-        ], array_values($groups));
+        $digest = array_map(function (array $g) use ($threshold): array {
+            $variants = array_values($g['variants']);
+            usort($variants, static fn (array $a, array $b): int => $b['count'] <=> $a['count']);
+
+            return [
+                'addon' => $g['addon'],
+                'path' => $g['path'],
+                'count' => $g['count'],
+                'reporters' => count($g['reporters']),
+                'message' => $g['message'],
+                'location' => $g['location'],
+                'last_index' => $g['indices'] === [] ? 0 : max($g['indices']),
+                'first_index' => $g['indices'] === [] ? 0 : min($g['indices']),
+                'recent' => count(array_filter($g['indices'], static fn (int $i): bool => $i >= $threshold)),
+                'variants' => $variants,
+            ];
+        }, array_values($groups));
 
         usort($digest, fn (array $a, array $b): int => $b['count'] <=> $a['count']);
 
-        return $digest;
+        return [
+            'groups' => $digest,
+            'total' => $index,
+            'buckets' => self::bucket($groups, $index, $bucketCount),
+        ];
+    }
+
+    /**
+     * Error volume per equal-width slice of the log. The x axis is position, not
+     * time - but because the log is append-only, "further right" does mean "later",
+     * and a spike at the right-hand end is a problem happening now.
+     *
+     * @param  array<string, array<string, mixed>>  $groups
+     * @return list<int>
+     */
+    private static function bucket(array $groups, int $total, int $bucketCount): array
+    {
+        $bucketCount = max($bucketCount, 1);
+
+        if ($total === 0) {
+            return array_fill(0, $bucketCount, 0);
+        }
+
+        $buckets = array_fill(0, $bucketCount, 0);
+
+        foreach ($groups as $group) {
+            foreach ($group['indices'] as $index) {
+                $slot = (int) floor(($index / $total) * $bucketCount);
+                $buckets[min($slot, $bucketCount - 1)]++;
+            }
+        }
+
+        return $buckets;
     }
 
     /**

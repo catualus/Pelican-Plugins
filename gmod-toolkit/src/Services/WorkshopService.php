@@ -21,6 +21,16 @@ class WorkshopService
     private const DETAILS = 'https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/';
 
     /**
+     * Steam accepts a form-encoded array of ids, but a collection of several hundred
+     * makes a request large enough that Steam answers with an empty body rather than
+     * an error. Batching keeps every request comfortably small.
+     */
+    private const BATCH = 100;
+
+    /** Garry's Mod. An item from any other game in the collection is a mistake. */
+    public const GMOD_APP_ID = 4000;
+
+    /**
      * The collection id comes from the WORKSHOP_ID startup variable the Garry's Mod
      * egg already defines.
      *
@@ -62,7 +72,7 @@ class WorkshopService
     }
 
     /**
-     * @return list<array{id: string, title: string, size: int, updated: ?int, created: ?int, subscriptions: int, banned: bool, ban_reason: ?string, preview: ?string, url: string}>
+     * @return list<array{id: string, title: string, size: int, updated: ?int, created: ?int, subscriptions: int, favourited: int, app_id: int, foreign: bool, banned: bool, ban_reason: ?string, preview: ?string, url: string}>
      */
     public function addons(string $collectionId): array
     {
@@ -88,6 +98,56 @@ class WorkshopService
         }
 
         return $addons;
+    }
+
+    /**
+     * Everything the overview and the charts need about a collection, derived once
+     * so a stat tile and the bar beside it can never disagree.
+     *
+     * @param  list<array<string, mixed>>  $addons
+     * @return array{count: int, size: int, largest: ?array<string, mixed>, median: int, recent: int, banned: int, foreign: int, undated: int, freshness: array<string, int>}
+     */
+    public function summarise(array $addons, int $recentDays): array
+    {
+        $sizes = array_map(static fn (array $a): int => (int) $a['size'], $addons);
+        sort($sizes);
+
+        $recentCutoff = now()->subDays($recentDays)->getTimestamp();
+        $monthCutoff = now()->subDays(30)->getTimestamp();
+        $yearCutoff = now()->subDays(365)->getTimestamp();
+
+        $freshness = ['recent' => 0, 'month' => 0, 'year' => 0, 'stale' => 0, 'unknown' => 0];
+
+        foreach ($addons as $addon) {
+            $updated = $addon['updated'] ?? null;
+
+            $bucket = match (true) {
+                $updated === null => 'unknown',
+                $updated >= $recentCutoff => 'recent',
+                $updated >= $monthCutoff => 'month',
+                $updated >= $yearCutoff => 'year',
+                default => 'stale',
+            };
+
+            $freshness[$bucket]++;
+        }
+
+        $largest = $addons === [] ? null : array_reduce(
+            $addons,
+            static fn (?array $carry, array $addon): array => ($carry === null || $addon['size'] > $carry['size']) ? $addon : $carry,
+        );
+
+        return [
+            'count' => count($addons),
+            'size' => array_sum($sizes),
+            'largest' => $largest,
+            'median' => $sizes === [] ? 0 : (int) $sizes[intdiv(count($sizes), 2)],
+            'recent' => $freshness['recent'],
+            'banned' => count(array_filter($addons, static fn (array $a): bool => (bool) $a['banned'])),
+            'foreign' => count(array_filter($addons, static fn (array $a): bool => (bool) $a['foreign'])),
+            'undated' => $freshness['unknown'],
+            'freshness' => $freshness,
+        ];
     }
 
     /**
@@ -123,6 +183,25 @@ class WorkshopService
      */
     private function details(array $ids): array
     {
+        $addons = [];
+
+        foreach (array_chunk($ids, self::BATCH) as $batch) {
+            foreach ($this->detailsBatch($batch) as $addon) {
+                $addons[] = $addon;
+            }
+        }
+
+        usort($addons, fn (array $a, array $b): int => ($b['updated'] ?? 0) <=> ($a['updated'] ?? 0));
+
+        return $addons;
+    }
+
+    /**
+     * @param  list<string>  $ids
+     * @return list<array<string, mixed>>
+     */
+    private function detailsBatch(array $ids): array
+    {
         $response = Http::asForm()
             ->timeout(20)
             ->post(self::DETAILS, [
@@ -141,6 +220,9 @@ class WorkshopService
                 continue;
             }
 
+            // Steam returns file_size as a string on some items and an int on others.
+            $appId = (int) ($item['consumer_app_id'] ?? $item['creator_app_id'] ?? 0);
+
             $addons[] = [
                 'id' => $id,
                 'title' => (string) ($item['title'] ?? $id),
@@ -148,14 +230,17 @@ class WorkshopService
                 'updated' => isset($item['time_updated']) ? (int) $item['time_updated'] : null,
                 'created' => isset($item['time_created']) ? (int) $item['time_created'] : null,
                 'subscriptions' => (int) ($item['subscriptions'] ?? 0),
+                'favourited' => (int) ($item['favorited'] ?? 0),
+                'app_id' => $appId,
+                // An item from another game will never mount, and the collection page
+                // gives no hint of it - so say so here.
+                'foreign' => $appId !== 0 && $appId !== self::GMOD_APP_ID,
                 'banned' => (bool) ($item['banned'] ?? false),
                 'ban_reason' => ($item['ban_reason'] ?? '') ?: null,
                 'preview' => ($item['preview_url'] ?? '') ?: null,
                 'url' => 'https://steamcommunity.com/sharedfiles/filedetails/?id=' . $id,
             ];
         }
-
-        usort($addons, fn (array $a, array $b): int => ($b['updated'] ?? 0) <=> ($a['updated'] ?? 0));
 
         return $addons;
     }

@@ -1,12 +1,66 @@
 <x-filament-panels::page>
+    @if ($scanning)
+        {{-- wire:poll drives the scan a few addons at a time. Doing the whole walk in
+             one request would mean thousands of daemon calls behind a spinner that
+             says nothing, and any reverse proxy in front of the panel would time it
+             out long before it finished. --}}
+        <div wire:poll.750ms="scanStep">
+            <x-filament::section>
+                <x-slot name="heading">Measuring disk usage</x-slot>
+
+                <x-slot name="description">
+                    {{ count($scanSizes) }} of {{ $scanTotal }} addons ·
+                    {{ number_format($scanRequests) }} daemon requests so far
+                    @if ($scanCurrent !== '')
+                        · currently <code>{{ $scanCurrent }}</code>
+                    @endif
+                </x-slot>
+
+                <x-slot name="headerEnd">
+                    <x-filament::button size="sm" color="gray" icon="tabler-x" wire:click="cancelScan">
+                        Stop
+                    </x-filament::button>
+                </x-slot>
+
+                @php $progress = $this->scanProgress(); @endphp
+
+                <div
+                    role="progressbar"
+                    aria-valuenow="{{ $progress }}"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    style="
+                        height: 0.5rem;
+                        border-radius: 999px;
+                        overflow: hidden;
+                        background-color: color-mix(in srgb, currentColor 12%, transparent);
+                    "
+                >
+                    <div style="width: {{ $progress }}%; height: 100%; background-color: #3b82f6; transition: width 0.3s;"></div>
+                </div>
+
+                <p class="fi-text-xs fi-opacity-70" style="margin-top: 0.5rem;">
+                    The daemon has no way to report a folder's size, so this walks the tree
+                    one directory at a time. You can leave this page - the scan stops if you
+                    do, and nothing is saved until it finishes.
+                </p>
+            </x-filament::section>
+        </div>
+    @endif
+
     @if ($darkrp !== [])
         <x-filament::section>
             <x-slot name="heading">DarkRP</x-slot>
-            <x-slot name="description">Jump straight into the config folders.</x-slot>
+            <x-slot name="description">
+                The folders worth editing. Configure DarkRP through
+                <code>darkrpmodification</code> rather than the gamemode itself, or the next
+                update overwrites your changes.
+            </x-slot>
 
             <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
                 @foreach ($darkrp as $shortcut)
                     <x-filament::button
+                        wire:key="darkrp-{{ md5($shortcut['path']) }}"
                         tag="a"
                         :href="$this->fileUrl($shortcut['path'])"
                         color="gray"
@@ -18,74 +72,5 @@
         </x-filament::section>
     @endif
 
-    <x-filament::section>
-        <x-slot name="heading">Addons</x-slot>
-
-        <x-slot name="description">
-            Sorted by what is erroring <em>now</em>, then by worst overall. A red count is
-            still happening; a grey one has not recurred recently. Disabling moves the folder
-            into <code>addons/__disabled</code>; Garry's Mod loads every direct child of
-            <code>addons</code>, so this is what actually unloads it.
-        </x-slot>
-
-        @if ($addons === [])
-            <p class="fi-text-sm">
-                No addons found. Either <code>garrysmod/addons</code> is empty, or the server
-                is installing and its files are not readable yet.
-            </p>
-        @else
-            <div class="fi-ta-ctn" style="overflow-x: auto;">
-                <table class="fi-ta-table" style="width: 100%; text-align: start;">
-                    <thead>
-                        <tr>
-                            <th style="text-align: start; padding: 0.5rem 0.75rem;">Addon</th>
-                            <th style="text-align: end; padding: 0.5rem 0.75rem;">Errors</th>
-                            <th style="text-align: start; padding: 0.5rem 0.75rem;">Modified</th>
-                            <th style="text-align: end; padding: 0.5rem 0.75rem;">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach ($addons as $addon)
-                            <tr>
-                                <td style="padding: 0.5rem 0.75rem;">
-                                    <x-filament::link :href="$this->fileUrl($addon['path'])">
-                                        {{ $addon['name'] }}
-                                    </x-filament::link>
-
-                                    @unless ($addon['enabled'])
-                                        <x-filament::badge color="gray">Disabled</x-filament::badge>
-                                    @endunless
-                                </td>
-                                <td style="padding: 0.5rem 0.75rem; text-align: end; white-space: nowrap;">
-                                    @if ($addon['errors'] > 0)
-                                        <x-filament::badge :color="$addon['recent'] > 0 ? 'danger' : 'gray'">
-                                            {{ number_format($addon['errors']) }}
-                                        </x-filament::badge>
-                                        @if ($addon['recent'] > 0)
-                                            <x-filament::badge color="warning">Active</x-filament::badge>
-                                        @endif
-                                    @else
-                                        <span class="fi-text-sm">-</span>
-                                    @endif
-                                </td>
-                                <td style="padding: 0.5rem 0.75rem; white-space: nowrap;">
-                                    {{ $addon['modified']?->diffForHumans() ?? '-' }}
-                                </td>
-                                <td style="padding: 0.5rem 0.75rem; text-align: end;">
-                                    @if ($writable)
-                                        <x-filament::button
-                                            size="xs"
-                                            :color="$addon['enabled'] ? 'gray' : 'primary'"
-                                            wire:click="toggle(@js($addon['name']), {{ $addon['enabled'] ? 'false' : 'true' }})"
-                                            wire:loading.attr="disabled"
-                                        >{{ $addon['enabled'] ? 'Disable' : 'Enable' }}</x-filament::button>
-                                    @endif
-                                </td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
-            </div>
-        @endif
-    </x-filament::section>
+    {{ $this->table }}
 </x-filament-panels::page>
